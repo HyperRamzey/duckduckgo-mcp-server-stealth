@@ -1,11 +1,17 @@
 [project]
-name = "duckduckgo-mcp-server"
-version = "0.3.0"
-description = "MCP Server for searching via DuckDuckGo"
+name = "duckduckgo-mcp-server-stealth"
+version = "0.4.0"
+description = "MCP Server for searching via DuckDuckGo with browser-based anti-bot-detection"
 readme = "README.md"
 authors = [{ name = "Nick Clyde", email = "nick@clyde.tech" }]
 requires-python = ">=3.10"
-dependencies = ["beautifulsoup4>=4.13.3", "httpx>=0.28.1", "httpcore>=1.0.8", "mcp[cli]>=1.26.0"]
+dependencies = [
+    "beautifulsoup4>=4.13.3",
+    "httpx>=0.28.1",
+    "httpcore>=1.0.8",
+    "mcp[cli]>=1.26.0",
+    "scrapling>=0.4.0",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -19,15 +25,15 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nickclyde/duckduckgo-mcp-server"
-Issues = "https://github.com/nickclyde/duckduckgo-mcp-server/issues"
+Homepage = "https://github.com/nickclyde/duckduckgo-mcp-server-stealth"
+Issues = "https://github.com/nickclyde/duckduckgo-mcp-server-stealth/issues"
 
-# Optional extras. Install with e.g. `pip install duckduckgo-mcp-server[browser]`.
+# Optional extras. Install with e.g. `pip install duckduckgo-mcp-server-stealth[curl]`.
 [project.optional-dependencies]
-# Enables the `--fetch-backend curl` option (and `auto` fallback), which uses
-# curl_cffi to impersonate a real browser's TLS fingerprint so fetch_content
-# can pass through TLS-fingerprint-based bot filters. Not needed for basic use.
-browser = ["curl_cffi>=0.7.0"]
+# Enables the `--search-backend curl` and `--fetch-backend curl` options, which use
+# curl_cffi to impersonate a real browser's TLS fingerprint. Optional since the
+# default browser backend (scrapling) is more reliable for DuckDuckGo search.
+curl = ["curl_cffi>=0.7.0"]
 
 [project.scripts]
 duckduckgo-mcp-server = "duckduckgo_mcp_server.server:main"

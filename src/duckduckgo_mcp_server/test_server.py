@@ -21,6 +21,7 @@ from duckduckgo_mcp_server.server import (
 
 try:
     import curl_cffi  # noqa: F401
+
     HAS_CURL_CFFI = True
 except ImportError:
     HAS_CURL_CFFI = False
@@ -141,15 +142,31 @@ class TestDuckDuckGoSearcherParsing(unittest.TestCase):
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            results = asyncio.run(searcher.search("test query", ctx, max_results, region))
+            results = asyncio.run(
+                searcher.search("test query", ctx, max_results, region)
+            )
         return results
 
     def test_search_parses_results_from_html(self):
-        html = _make_ddg_html([
-            {"title": "Result One", "href": "https://one.com", "snippet": "Snippet 1"},
-            {"title": "Result Two", "href": "https://two.com", "snippet": "Snippet 2"},
-            {"title": "Result Three", "href": "https://three.com", "snippet": "Snippet 3"},
-        ])
+        html = _make_ddg_html(
+            [
+                {
+                    "title": "Result One",
+                    "href": "https://one.com",
+                    "snippet": "Snippet 1",
+                },
+                {
+                    "title": "Result Two",
+                    "href": "https://two.com",
+                    "snippet": "Snippet 2",
+                },
+                {
+                    "title": "Result Three",
+                    "href": "https://three.com",
+                    "snippet": "Snippet 3",
+                },
+            ]
+        )
         results = self._run_search(html)
         self.assertEqual(len(results), 3)
         self.assertEqual(results[0].title, "Result One")
@@ -160,38 +177,50 @@ class TestDuckDuckGoSearcherParsing(unittest.TestCase):
 
     def test_search_cleans_redirect_urls(self):
         encoded_url = "https%3A%2F%2Fexample.com%2Fpage"
-        html = _make_ddg_html([
-            {
-                "title": "Redirected",
-                "href": f"//duckduckgo.com/l/?uddg={encoded_url}&rut=abc",
-                "snippet": "A snippet",
-            },
-        ])
+        html = _make_ddg_html(
+            [
+                {
+                    "title": "Redirected",
+                    "href": f"//duckduckgo.com/l/?uddg={encoded_url}&rut=abc",
+                    "snippet": "A snippet",
+                },
+            ]
+        )
         results = self._run_search(html)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].link, "https://example.com/page")
 
     def test_search_filters_ads(self):
-        html = _make_ddg_html([
-            {"title": "Ad Result", "href": "https://duckduckgo.com/y.js?ad=1", "snippet": "Ad"},
-            {"title": "Real Result", "href": "https://real.com", "snippet": "Real"},
-        ])
+        html = _make_ddg_html(
+            [
+                {
+                    "title": "Ad Result",
+                    "href": "https://duckduckgo.com/y.js?ad=1",
+                    "snippet": "Ad",
+                },
+                {"title": "Real Result", "href": "https://real.com", "snippet": "Real"},
+            ]
+        )
         results = self._run_search(html)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].title, "Real Result")
 
     def test_search_respects_max_results(self):
-        html = _make_ddg_html([
-            {"title": f"R{i}", "href": f"https://r{i}.com", "snippet": f"S{i}"}
-            for i in range(5)
-        ])
+        html = _make_ddg_html(
+            [
+                {"title": f"R{i}", "href": f"https://r{i}.com", "snippet": f"S{i}"}
+                for i in range(5)
+            ]
+        )
         results = self._run_search(html, max_results=2)
         self.assertEqual(len(results), 2)
 
     def test_search_handles_missing_snippet(self):
-        html = _make_ddg_html([
-            {"title": "No Snippet", "href": "https://nosnip.com"},
-        ])
+        html = _make_ddg_html(
+            [
+                {"title": "No Snippet", "href": "https://nosnip.com"},
+            ]
+        )
         results = self._run_search(html)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].snippet, "")
@@ -216,7 +245,9 @@ class TestDuckDuckGoSearcherParsing(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.status_code = 503
         mock_resp.request = MagicMock()
-        error = httpx.HTTPStatusError("error", request=mock_resp.request, response=mock_resp)
+        error = httpx.HTTPStatusError(
+            "error", request=mock_resp.request, response=mock_resp
+        )
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
@@ -306,13 +337,17 @@ class TestWebContentFetcher(unittest.TestCase):
                     fetcher = WebContentFetcher(backend=backend)
                     # Fetch first 50 chars
                     text = asyncio.run(
-                        fetcher.fetch_and_parse(url, DummyCtx(), start_index=0, max_length=50)
+                        fetcher.fetch_and_parse(
+                            url, DummyCtx(), start_index=0, max_length=50
+                        )
                     )
                     self.assertIn("start_index=50 to see more", text)
                     self.assertIn("of 100 total", text)
                     # Fetch from offset 50
                     text = asyncio.run(
-                        fetcher.fetch_and_parse(url, DummyCtx(), start_index=50, max_length=50)
+                        fetcher.fetch_and_parse(
+                            url, DummyCtx(), start_index=50, max_length=50
+                        )
                     )
                     self.assertNotIn("to see more", text)
                     self.assertIn("of 100 total", text)
@@ -349,7 +384,11 @@ class TestWebContentFetcherErrors(unittest.TestCase):
                 fetcher = WebContentFetcher(backend=backend)
                 # Use an exception whose type-name triggers the server's curl-path
                 # error handling without needing curl_cffi's exception hierarchy.
-                exc = httpx.TimeoutException("timed out") if backend == "httpx" else TimeoutError("timed out")
+                exc = (
+                    httpx.TimeoutException("timed out")
+                    if backend == "httpx"
+                    else TimeoutError("timed out")
+                )
                 with _patch_backend_client(backend, get_side_effect=exc):
                     result = asyncio.run(
                         fetcher.fetch_and_parse("https://example.com", DummyCtx())
@@ -365,7 +404,9 @@ class TestWebContentFetcherErrors(unittest.TestCase):
                 mock_resp.status_code = 500
                 mock_resp.request = MagicMock()
                 if backend == "httpx":
-                    err = httpx.HTTPStatusError("server error", request=mock_resp.request, response=mock_resp)
+                    err = httpx.HTTPStatusError(
+                        "server error", request=mock_resp.request, response=mock_resp
+                    )
                 else:
                     err = RuntimeError("curl http 500")
                 mock_resp.raise_for_status = MagicMock(side_effect=err)
@@ -416,8 +457,10 @@ class TestWebContentFetcherBackend(unittest.TestCase):
             called["curl"] = True
             return "<html><body><p>from curl</p></body></html>"
 
-        with patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx), \
-             patch.object(fetcher, "_fetch_curl", side_effect=fake_curl):
+        with (
+            patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx),
+            patch.object(fetcher, "_fetch_curl", side_effect=fake_curl),
+        ):
             text = asyncio.run(
                 fetcher.fetch_and_parse("https://example.com", ctx, backend="curl")
             )
@@ -459,9 +502,13 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
             called["curl"] += 1
             return "<html><body><p>from curl</p></body></html>"
 
-        with patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx), \
-             patch.object(fetcher, "_fetch_curl", side_effect=fake_curl):
-            text = asyncio.run(fetcher.fetch_and_parse("https://example.com", DummyCtx()))
+        with (
+            patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx),
+            patch.object(fetcher, "_fetch_curl", side_effect=fake_curl),
+        ):
+            text = asyncio.run(
+                fetcher.fetch_and_parse("https://example.com", DummyCtx())
+            )
 
         self.assertEqual(called["httpx"], 1)
         self.assertEqual(called["curl"], 0)
@@ -473,7 +520,9 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
 
         mock_resp = MagicMock()
         mock_resp.status_code = 403
-        err = httpx.HTTPStatusError("forbidden", request=MagicMock(), response=mock_resp)
+        err = httpx.HTTPStatusError(
+            "forbidden", request=MagicMock(), response=mock_resp
+        )
 
         async def fake_httpx(url):
             raise err
@@ -482,9 +531,13 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
             called["curl"] += 1
             return "<html><body><p>rescued by curl</p></body></html>"
 
-        with patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx), \
-             patch.object(fetcher, "_fetch_curl", side_effect=fake_curl):
-            text = asyncio.run(fetcher.fetch_and_parse("https://example.com", DummyCtx()))
+        with (
+            patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx),
+            patch.object(fetcher, "_fetch_curl", side_effect=fake_curl),
+        ):
+            text = asyncio.run(
+                fetcher.fetch_and_parse("https://example.com", DummyCtx())
+            )
 
         self.assertEqual(called["curl"], 1)
         self.assertIn("rescued by curl", text)
@@ -503,9 +556,13 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
             called["curl"] += 1
             return "<html><body><p>real content</p></body></html>"
 
-        with patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx), \
-             patch.object(fetcher, "_fetch_curl", side_effect=fake_curl):
-            text = asyncio.run(fetcher.fetch_and_parse("https://example.com", DummyCtx()))
+        with (
+            patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx),
+            patch.object(fetcher, "_fetch_curl", side_effect=fake_curl),
+        ):
+            text = asyncio.run(
+                fetcher.fetch_and_parse("https://example.com", DummyCtx())
+            )
 
         self.assertEqual(called["curl"], 1)
         self.assertIn("real content", text)
@@ -517,7 +574,9 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
 
         mock_resp = MagicMock()
         mock_resp.status_code = 500
-        err = httpx.HTTPStatusError("server error", request=MagicMock(), response=mock_resp)
+        err = httpx.HTTPStatusError(
+            "server error", request=MagicMock(), response=mock_resp
+        )
 
         async def fake_httpx(url):
             raise err
@@ -526,9 +585,13 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
             called["curl"] += 1
             return "<html></html>"
 
-        with patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx), \
-             patch.object(fetcher, "_fetch_curl", side_effect=fake_curl):
-            result = asyncio.run(fetcher.fetch_and_parse("https://example.com", DummyCtx()))
+        with (
+            patch.object(fetcher, "_fetch_httpx", side_effect=fake_httpx),
+            patch.object(fetcher, "_fetch_curl", side_effect=fake_curl),
+        ):
+            result = asyncio.run(
+                fetcher.fetch_and_parse("https://example.com", DummyCtx())
+            )
 
         self.assertEqual(called["curl"], 0)
         self.assertTrue(result.startswith("Error"))
@@ -536,15 +599,21 @@ class TestWebContentFetcherAutoFallback(unittest.TestCase):
 
 class TestMainCliArgs(unittest.TestCase):
     def test_main_parses_fetch_backend_flag(self):
-        with patch.object(sys, "argv", ["duckduckgo-mcp-server", "--fetch-backend", "auto"]), \
-             patch("duckduckgo_mcp_server.server.mcp") as mock_mcp:
+        with (
+            patch.object(
+                sys, "argv", ["duckduckgo-mcp-server", "--fetch-backend", "auto"]
+            ),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
             duckduckgo_mcp_server.server.main()
             mock_mcp.run.assert_called_once()
         self.assertEqual(duckduckgo_mcp_server.server.fetcher.default_backend, "auto")
 
     def test_main_defaults_to_httpx(self):
-        with patch.object(sys, "argv", ["duckduckgo-mcp-server"]), \
-             patch("duckduckgo_mcp_server.server.mcp") as mock_mcp:
+        with (
+            patch.object(sys, "argv", ["duckduckgo-mcp-server"]),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
             duckduckgo_mcp_server.server.main()
             mock_mcp.run.assert_called_once()
         self.assertEqual(duckduckgo_mcp_server.server.fetcher.default_backend, "httpx")
@@ -552,12 +621,17 @@ class TestMainCliArgs(unittest.TestCase):
     def test_main_applies_host_and_port_to_settings(self):
         argv = [
             "duckduckgo-mcp-server",
-            "--transport", "streamable-http",
-            "--host", "0.0.0.0",
-            "--port", "7070",
+            "--transport",
+            "streamable-http",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "7070",
         ]
-        with patch.object(sys, "argv", argv), \
-             patch("duckduckgo_mcp_server.server.mcp") as mock_mcp:
+        with (
+            patch.object(sys, "argv", argv),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
             duckduckgo_mcp_server.server.main()
             self.assertEqual(mock_mcp.settings.host, "0.0.0.0")
             self.assertEqual(mock_mcp.settings.port, 7070)
@@ -565,8 +639,7 @@ class TestMainCliArgs(unittest.TestCase):
 
     def test_main_rejects_host_or_port_with_stdio(self):
         argv = ["duckduckgo-mcp-server", "--port", "7070"]
-        with patch.object(sys, "argv", argv), \
-             patch("duckduckgo_mcp_server.server.mcp"):
+        with patch.object(sys, "argv", argv), patch("duckduckgo_mcp_server.server.mcp"):
             with self.assertRaises(SystemExit):
                 duckduckgo_mcp_server.server.main()
 
