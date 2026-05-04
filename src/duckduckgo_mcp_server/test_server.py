@@ -26,6 +26,13 @@ try:
 except ImportError:
     HAS_CURL_CFFI = False
 
+try:
+    import scrapling  # noqa: F401
+
+    HAS_SCRAPLING = True
+except ImportError:
+    HAS_SCRAPLING = False
+
 
 class DummyCtx:
     async def info(self, message):
@@ -131,8 +138,8 @@ def _mock_post_response(html, status_code=200):
 
 class TestDuckDuckGoSearcherParsing(unittest.TestCase):
     def _run_search(self, html, max_results=10, region=""):
-        """Helper to run a search with mocked HTTP."""
-        searcher = DuckDuckGoSearcher()
+        """Helper to run a search with mocked HTTP (uses httpx backend)."""
+        searcher = DuckDuckGoSearcher(backend="httpx")
         ctx = DummyCtx()
 
         mock_resp = _mock_post_response(html)
@@ -651,7 +658,9 @@ class TestConfiguration(unittest.TestCase):
         self.assertEqual(SafeSearchMode.OFF.value, "-2")
 
     def test_searcher_passes_safe_search_to_request(self):
-        searcher = DuckDuckGoSearcher(safe_search=SafeSearchMode.STRICT)
+        searcher = DuckDuckGoSearcher(
+            safe_search=SafeSearchMode.STRICT, backend="httpx"
+        )
         ctx = DummyCtx()
 
         mock_resp = _mock_post_response("<html><body></body></html>")
@@ -668,7 +677,7 @@ class TestConfiguration(unittest.TestCase):
         self.assertEqual(post_data["kp"], "1")
 
     def test_searcher_passes_region_to_request(self):
-        searcher = DuckDuckGoSearcher(default_region="us-en")
+        searcher = DuckDuckGoSearcher(default_region="us-en", backend="httpx")
         ctx = DummyCtx()
 
         mock_resp = _mock_post_response("<html><body></body></html>")
@@ -683,3 +692,269 @@ class TestConfiguration(unittest.TestCase):
         call_kwargs = mock_client.post.call_args
         post_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
         self.assertEqual(post_data["kl"], "us-en")
+
+
+class TestSearchBackendValidation(unittest.TestCase):
+    def test_valid_backends_accepted(self):
+        for backend in ("httpx", "curl", "browser"):
+            with self.subTest(backend=backend):
+                searcher = DuckDuckGoSearcher(backend=backend)
+                self.assertEqual(searcher.backend, backend)
+
+    def test_invalid_backend_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            DuckDuckGoSearcher(backend="invalid")
+        self.assertIn("Unknown search backend", str(ctx.exception))
+        self.assertIn("invalid", str(ctx.exception))
+
+    def test_default_backend_is_browser(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertEqual(searcher.backend, "browser")
+
+
+class TestIsBlockedResponse(unittest.TestCase):
+    def test_blocked_sorry_message(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertTrue(
+            searcher._is_blocked_response(
+                "<html><body>Sorry... your search was blocked</body></html>"
+            )
+        )
+
+    def test_blocked_cf_mitigated(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertTrue(
+            searcher._is_blocked_response(
+                "<html><body>cf-mitigated:challenge</body></html>"
+            )
+        )
+
+    def test_blocked_just_a_moment(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertTrue(
+            searcher._is_blocked_response("<html><body>Just a moment...</body></html>")
+        )
+
+    def test_blocked_checking_browser(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertTrue(
+            searcher._is_blocked_response(
+                "<html><body>Checking your browser before accessing</body></html>"
+            )
+        )
+
+    def test_blocked_antibot_page(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertTrue(
+            searcher._is_blocked_response("<html><body>antibot-page</body></html>")
+        )
+
+    def test_not_blocked_normal_html(self):
+        searcher = DuckDuckGoSearcher()
+        html = '<html><body><div class="result"><h2 class="result__title"><a href="https://example.com">Result</a></h2></div></body></html>'
+        self.assertFalse(searcher._is_blocked_response(html))
+
+    def test_not_blocked_empty_string(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertFalse(searcher._is_blocked_response(""))
+
+    def test_not_blocked_none(self):
+        searcher = DuckDuckGoSearcher()
+        self.assertFalse(searcher._is_blocked_response(None))
+
+    def test_checks_first_8k_chars_only(self):
+        """Only the first 8192 chars are checked for block signals."""
+        searcher = DuckDuckGoSearcher()
+        # Pad with spaces so "Sorry..." appears past position 8192
+        padding = "A" * 9000
+        html = padding + "Sorry, your search was blocked"
+        self.assertFalse(searcher._is_blocked_response(html))
+
+
+class TestBrowserBackend(unittest.TestCase):
+    def _make_mock_stealth_fetcher(self):
+        """Create a mock StealthyFetcher class with async_fetch."""
+        mock_sf = MagicMock()
+        mock_async_fetch = AsyncMock(
+            return_value=MagicMock(html_content="<html><body></body></html>")
+        )
+        mock_sf.async_fetch = mock_async_fetch
+        return mock_sf, mock_async_fetch
+
+    def test_browser_backend_fetches_results(self):
+        """Browser backend should use StealthyFetcher.async_fetch, not httpx."""
+        searcher = DuckDuckGoSearcher(backend="browser")
+        ctx = DummyCtx()
+
+        html = _make_ddg_html(
+            [
+                {
+                    "title": "Browser Result",
+                    "href": "https://browser.example.com",
+                    "snippet": "Browser snippet",
+                },
+            ]
+        )
+
+        mock_sf, mock_async_fetch = self._make_mock_stealth_fetcher()
+        mock_async_fetch.return_value = MagicMock(html_content=html)
+
+        mock_module = MagicMock()
+        mock_module.StealthyFetcher = mock_sf
+
+        with patch.dict(
+            sys.modules, {"scrapling.fetchers.stealth_chrome": mock_module}
+        ):
+            results = asyncio.run(searcher.search("test query", ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].title, "Browser Result")
+        self.assertEqual(results[0].link, "https://browser.example.com")
+        self.assertEqual(results[0].snippet, "Browser snippet")
+
+        # Verify async_fetch was called with correct URL pattern
+        call_args = mock_async_fetch.call_args
+        url = call_args[0][0]
+        self.assertIn("test+query", url)
+        self.assertIn("html.duckduckgo.com", url)
+
+    def test_browser_backend_blocked_response(self):
+        """Browser backend should return empty list when blocked."""
+        searcher = DuckDuckGoSearcher(backend="browser")
+        ctx = DummyCtx()
+
+        mock_sf, mock_async_fetch = self._make_mock_stealth_fetcher()
+        mock_async_fetch.return_value = MagicMock(
+            html_content="<html><body>Sorry... your search was blocked</body></html>"
+        )
+
+        mock_module = MagicMock()
+        mock_module.StealthyFetcher = mock_sf
+
+        with patch.dict(
+            sys.modules, {"scrapling.fetchers.stealth_chrome": mock_module}
+        ):
+            results = asyncio.run(searcher.search("test query", ctx))
+
+        self.assertEqual(results, [])
+
+    def test_browser_backend_missing_scrapling(self):
+        """Browser backend should raise helpful error when scrapling is not installed."""
+        searcher = DuckDuckGoSearcher(backend="browser")
+        ctx = DummyCtx()
+
+        with patch.dict(sys.modules, {"scrapling": None, "scrapling.fetchers": None}):
+            results = asyncio.run(searcher.search("test query", ctx))
+
+        self.assertEqual(results, [])
+
+
+class TestCurlBackend(unittest.TestCase):
+    @unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi not installed")
+    def test_curl_backend_fetches_results(self):
+        """Curl backend should use curl_cffi.AsyncSession, not httpx."""
+        searcher = DuckDuckGoSearcher(backend="curl")
+        ctx = DummyCtx()
+
+        html = _make_ddg_html(
+            [
+                {
+                    "title": "Curl Result",
+                    "href": "https://curl.example.com",
+                    "snippet": "Curl snippet",
+                },
+            ]
+        )
+
+        mock_response = MagicMock()
+        mock_response.text = html
+
+        mock_session = AsyncMock()
+        mock_session.post = AsyncMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("curl_cffi.requests.AsyncSession", return_value=mock_session):
+            results = asyncio.run(searcher.search("test query", ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].title, "Curl Result")
+
+    @unittest.skipUnless(HAS_CURL_CFFI, "curl_cffi not installed")
+    def test_curl_backend_blocked_response(self):
+        """Curl backend should return empty list when blocked."""
+        searcher = DuckDuckGoSearcher(backend="curl")
+        ctx = DummyCtx()
+
+        mock_response = MagicMock()
+        mock_response.text = "<html><body>cf-mitigated</body></html>"
+
+        mock_session = AsyncMock()
+        mock_session.post = AsyncMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("curl_cffi.requests.AsyncSession", return_value=mock_session):
+            results = asyncio.run(searcher.search("test query", ctx))
+
+        self.assertEqual(results, [])
+
+    def test_curl_backend_missing_curl_cffi(self):
+        """Curl backend should raise helpful error when curl_cffi is not installed."""
+        searcher = DuckDuckGoSearcher(backend="curl")
+        ctx = DummyCtx()
+
+        with patch.dict(sys.modules, {"curl_cffi": None, "curl_cffi.requests": None}):
+            results = asyncio.run(searcher.search("test query", ctx))
+
+        self.assertEqual(results, [])
+
+
+class TestSearchBackendCLI(unittest.TestCase):
+    def test_main_parses_search_backend_browser(self):
+        with (
+            patch.object(
+                sys, "argv", ["duckduckgo-mcp-server", "--search-backend", "browser"]
+            ),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
+            duckduckgo_mcp_server.server.main()
+            mock_mcp.run.assert_called_once()
+        self.assertEqual(duckduckgo_mcp_server.server.searcher.backend, "browser")
+
+    def test_main_parses_search_backend_httpx(self):
+        with (
+            patch.object(
+                sys, "argv", ["duckduckgo-mcp-server", "--search-backend", "httpx"]
+            ),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
+            duckduckgo_mcp_server.server.main()
+            mock_mcp.run.assert_called_once()
+        self.assertEqual(duckduckgo_mcp_server.server.searcher.backend, "httpx")
+
+    def test_main_parses_search_backend_curl(self):
+        with (
+            patch.object(
+                sys, "argv", ["duckduckgo-mcp-server", "--search-backend", "curl"]
+            ),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
+            duckduckgo_mcp_server.server.main()
+            mock_mcp.run.assert_called_once()
+        self.assertEqual(duckduckgo_mcp_server.server.searcher.backend, "curl")
+
+    def test_main_defaults_to_browser(self):
+        with (
+            patch.object(sys, "argv", ["duckduckgo-mcp-server"]),
+            patch("duckduckgo_mcp_server.server.mcp") as mock_mcp,
+        ):
+            duckduckgo_mcp_server.server.main()
+            mock_mcp.run.assert_called_once()
+        self.assertEqual(duckduckgo_mcp_server.server.searcher.backend, "browser")
+
+    def test_main_rejects_invalid_search_backend(self):
+        argv = ["duckduckgo-mcp-server", "--search-backend", "invalid"]
+        with patch.object(sys, "argv", argv), patch("duckduckgo_mcp_server.server.mcp"):
+            with self.assertRaises(SystemExit):
+                duckduckgo_mcp_server.server.main()

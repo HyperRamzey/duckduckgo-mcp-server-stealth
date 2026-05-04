@@ -1,8 +1,8 @@
 # DuckDuckGo MCP Server (Stealth)
 
-[![PyPI version](https://img.shields.io/pypi/v/duckduckgo-mcp-server-stealth)](https://pypi.org/project/duckduckgo-mcp-server-stealth/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/duckduckgo-mcp-server-stealth)](https://pypi.org/project/duckduckgo-mcp-server-stealth/)
-[![Python versions](https://img.shields.io/pypi/pyversions/duckduckgo-mcp-server-stealth)](https://pypi.org/project/duckduckgo-mcp-server-stealth/)
+[![GitHub version](https://img.shields.io/github/v/tag/HyperRamzey/duckduckgo-mcp-server-stealth?label=version)](https://github.com/HyperRamzey/duckduckgo-mcp-server-stealth/releases)
+[![Python versions](https://img.shields.io/github/pypi/v/HyperRamzey/duckduckgo-mcp-server-stealth?label=python)](https://pypi.org/project/duckduckgo-mcp-server-stealth/)
+[![License: MIT](https://img.shields.io/github/license/HyperRamzey/duckduckgo-mcp-server-stealth)](https://github.com/HyperRamzey/duckduckgo-mcp-server-stealth/blob/main/LICENSE)
 
 A Model Context Protocol (MCP) server providing DuckDuckGo web search and webpage content fetching, with **browser-based search** that bypasses DuckDuckGo's bot detection.
 
@@ -10,7 +10,7 @@ This is a fork of [nickclyde/duckduckgo-mcp-server](https://github.com/nickclyde
 
 ## Why this fork?
 
-The original server uses plain `httpx` for DuckDuckGo search, which is frequently blocked by DuckDuckGo's bot detection. The `curl_cffi` TLS impersonation approach also fails with TLS SNI errors under vless VPN for me. This fork uses **scrapling's `StealthyFetcher`** — a real Chromium browser with stealth flags — which reliably bypasses bot detection and returns full search results.
+The original server uses plain `httpx` for DuckDuckGo search, which is frequently blocked by DuckDuckGo's bot detection. The `curl_cffi` TLS impersonation approach also fails with TLS SNI errors under vless Reality+xHTTP VPN for me. This fork uses **scrapling's `StealthyFetcher`** — a real Chromium browser with stealth flags — which reliably bypasses bot detection and returns full search results.
 
 ## Quick Start
 
@@ -25,6 +25,14 @@ pip install duckduckgo-mcp-server-stealth
 ```
 
 This installs `scrapling` (which includes `patchright` / Playwright) as a dependency. The first time the server runs, it will automatically download a Chromium browser binary.
+
+### Install from GitHub (latest)
+
+To install directly from the GitHub repository (useful for development or when the package hasn't been published to PyPI yet):
+
+```bash
+pip install git+https://github.com/HyperRamzey/duckduckgo-mcp-server-stealth.git
+```
 
 ## Usage
 

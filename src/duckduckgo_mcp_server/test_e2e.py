@@ -1,10 +1,10 @@
 """End-to-end MCP protocol tests using in-memory client/server sessions."""
 
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -100,17 +100,14 @@ async def test_search_tool_e2e(ddg_html_factory):
         ]
     )
 
-    mock_resp = MagicMock(spec=httpx.Response)
-    mock_resp.text = html
-    mock_resp.status_code = 200
-    mock_resp.raise_for_status = MagicMock()
+    mock_sf = MagicMock()
+    mock_async_fetch = AsyncMock(return_value=MagicMock(html_content=html))
+    mock_sf.async_fetch = mock_async_fetch
 
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_resp)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_module = MagicMock()
+    mock_module.StealthyFetcher = mock_sf
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
+    with patch.dict(sys.modules, {"scrapling.fetchers.stealth_chrome": mock_module}):
         async with create_connected_server_and_client_session(mcp_app) as client:
             result = await client.call_tool("search", {"query": "e2e test"})
             text = result.content[0].text
@@ -146,12 +143,15 @@ async def test_fetch_content_tool_lists_backend_in_schema():
 
 @pytest.mark.asyncio
 async def test_search_tool_handles_errors():
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
+    """Browser backend error (e.g. timeout) should return friendly message."""
+    mock_sf = MagicMock()
+    mock_async_fetch = AsyncMock(side_effect=Exception("timeout from browser"))
+    mock_sf.async_fetch = mock_async_fetch
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
+    mock_module = MagicMock()
+    mock_module.StealthyFetcher = mock_sf
+
+    with patch.dict(sys.modules, {"scrapling.fetchers.stealth_chrome": mock_module}):
         async with create_connected_server_and_client_session(mcp_app) as client:
             result = await client.call_tool("search", {"query": "timeout test"})
             text = result.content[0].text
