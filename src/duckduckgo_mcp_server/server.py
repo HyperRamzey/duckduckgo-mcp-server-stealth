@@ -154,7 +154,7 @@ class DuckDuckGoSearcher:
         params = urlencode(data)
         url = f"{self.BASE_URL}/?{params}"
 
-        resp = StealthyFetcher.fetch(
+        resp = await StealthyFetcher.async_fetch(
             url,
             headless=True,
             google_search=False,
