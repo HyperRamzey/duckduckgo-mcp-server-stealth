@@ -10,7 +10,7 @@ This is a fork of [nickclyde/duckduckgo-mcp-server](https://github.com/nickclyde
 
 ## Why this fork?
 
-The original server uses plain `httpx` for DuckDuckGo search, which is frequently blocked by DuckDuckGo's bot detection. The `curl_cffi` TLS impersonation approach also fails with TLS SNI errors. This fork uses **scrapling's `StealthyFetcher`** — a real Chromium browser with stealth flags — which reliably bypasses bot detection and returns full search results.
+The original server uses plain `httpx` for DuckDuckGo search, which is frequently blocked by DuckDuckGo's bot detection. The `curl_cffi` TLS impersonation approach also fails with TLS SNI errors under vless VPN for me. This fork uses **scrapling's `StealthyFetcher`** — a real Chromium browser with stealth flags — which reliably bypasses bot detection and returns full search results.
 
 ## Quick Start
 
