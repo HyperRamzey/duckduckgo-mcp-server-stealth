@@ -28,13 +28,27 @@ This installs `scrapling` (which includes `patchright` / Playwright) as a depend
 
 ## Usage
 
-### Running with Claude Code
+### Adding to Claude Code (global)
 
 ```bash
-claude mcp add ddg-search-stealth duckduckgo-mcp-server -- --search-backend browser
+claude mcp add ddg-search 'duckduckgo-mcp-server' -- --search-backend browser
 ```
 
-### Running with Claude Desktop
+### Adding to Claude Code (project-level)
+
+From the project directory:
+
+```bash
+claude mcp add ddg-search 'duckduckgo-mcp-server' -- --search-backend browser
+```
+
+### Adding to Claude Code (with custom region)
+
+```bash
+claude mcp add ddg-search 'duckduckgo-mcp-server' -- --search-backend browser -- DDG_REGION=us-en
+```
+
+### Adding to Claude Desktop
 
 Create or edit your Claude Desktop configuration:
 - On Windows: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -42,9 +56,12 @@ Create or edit your Claude Desktop configuration:
 ```json
 {
     "mcpServers": {
-        "ddg-search-stealth": {
+        "ddg-search": {
             "command": "duckduckgo-mcp-server",
-            "args": ["--search-backend", "browser"]
+            "args": ["--search-backend", "browser"],
+            "env": {
+                "DDG_REGION": "us-en"
+            }
         }
     }
 }
