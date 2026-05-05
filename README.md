@@ -152,3 +152,7 @@ ruff format src/
 ## License
 
 MIT — same as the original [duckduckgo-mcp-server](https://github.com/nickclyde/duckduckgo-mcp-server).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=nickclyde/duckduckgo-mcp-server&type=Date)](https://star-history.com/#nickclyde/duckduckgo-mcp-server&Date)
