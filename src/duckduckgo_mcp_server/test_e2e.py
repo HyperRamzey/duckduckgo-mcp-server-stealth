@@ -1,15 +1,27 @@
 """End-to-end MCP protocol tests using in-memory client/server sessions."""
 
-import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client import Client
 
+import duckduckgo_mcp_server.server as ddg_server
 from duckduckgo_mcp_server.server import mcp as mcp_app
+
+
+@pytest.fixture
+def allow_private_fetches():
+    """Let fetch_content reach the local test server (127.0.0.1) despite the SSRF guard."""
+    previous = ddg_server.fetcher.allow_private_urls
+    ddg_server.fetcher.allow_private_urls = True
+    try:
+        yield
+    finally:
+        ddg_server.fetcher.allow_private_urls = previous
 
 
 @pytest.fixture
@@ -62,26 +74,42 @@ def local_http_server():
         s.shutdown()
 
 
+@pytest.fixture
+def httpx_search_backend():
+    """Force the module searcher onto the httpx backend.
+
+    The browser backend (the default) drives a real Chromium via scrapling;
+    these tests mock httpx.AsyncClient, so they must run on the httpx backend.
+    """
+    previous = ddg_server.searcher.backend
+    ddg_server.searcher.backend = "httpx"
+    try:
+        yield
+    finally:
+        ddg_server.searcher.backend = previous
+
+
 @pytest.mark.asyncio
 async def test_server_lists_tools():
-    async with create_connected_server_and_client_session(mcp_app) as client:
+    async with Client(mcp_app) as client:
         tools_result = await client.list_tools()
         tool_names = {t.name for t in tools_result.tools}
         assert "search" in tool_names
         assert "fetch_content" in tool_names
+        assert "expand_link" in tool_names
 
         # Verify input schemas exist
         for tool in tools_result.tools:
-            assert tool.inputSchema is not None
-            assert "properties" in tool.inputSchema
+            assert tool.input_schema is not None
+            assert "properties" in tool.input_schema
 
 
 @pytest.mark.asyncio
-async def test_fetch_content_tool_e2e(local_http_server):
+async def test_fetch_content_tool_e2e(local_http_server, allow_private_fetches):
     html = "<html><body><h1>Hello E2E</h1><p>Test content here.</p></body></html>"
     url = local_http_server(html)
 
-    async with create_connected_server_and_client_session(mcp_app) as client:
+    async with Client(mcp_app) as client:
         result = await client.call_tool("fetch_content", {"url": url})
         text = result.content[0].text
         assert "Hello E2E" in text
@@ -89,26 +117,23 @@ async def test_fetch_content_tool_e2e(local_http_server):
 
 
 @pytest.mark.asyncio
-async def test_search_tool_e2e(ddg_html_factory):
-    html = ddg_html_factory(
-        [
-            {
-                "title": "E2E Result",
-                "href": "https://e2e.example.com",
-                "snippet": "An e2e snippet",
-            },
-        ]
-    )
+async def test_search_tool_e2e(ddg_html_factory, httpx_search_backend):
+    html = ddg_html_factory([
+        {"title": "E2E Result", "href": "https://e2e.example.com", "snippet": "An e2e snippet"},
+    ])
 
-    mock_sf = MagicMock()
-    mock_async_fetch = AsyncMock(return_value=MagicMock(html_content=html))
-    mock_sf.async_fetch = mock_async_fetch
+    mock_resp = MagicMock(spec=httpx.Response)
+    mock_resp.text = html
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
 
-    mock_module = MagicMock()
-    mock_module.StealthyFetcher = mock_sf
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    with patch.dict(sys.modules, {"scrapling.fetchers.stealth_chrome": mock_module}):
-        async with create_connected_server_and_client_session(mcp_app) as client:
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        async with Client(mcp_app) as client:
             result = await client.call_tool("search", {"query": "e2e test"})
             text = result.content[0].text
             assert "E2E Result" in text
@@ -116,44 +141,62 @@ async def test_search_tool_e2e(ddg_html_factory):
 
 
 @pytest.mark.asyncio
-async def test_fetch_content_tool_accepts_backend_param(local_http_server):
+async def test_fetch_content_tool_accepts_backend_param(local_http_server, allow_private_fetches):
     """The fetch_content tool should accept a per-call `backend` argument."""
     html = "<html><body><h1>Backend Param Test</h1></body></html>"
     url = local_http_server(html)
 
-    async with create_connected_server_and_client_session(mcp_app) as client:
-        result = await client.call_tool(
-            "fetch_content", {"url": url, "backend": "httpx"}
-        )
+    async with Client(mcp_app) as client:
+        result = await client.call_tool("fetch_content", {"url": url, "backend": "httpx"})
         text = result.content[0].text
         assert "Backend Param Test" in text
 
 
 @pytest.mark.asyncio
 async def test_fetch_content_tool_lists_backend_in_schema():
-    """The `backend` parameter should be advertised in fetch_content's inputSchema."""
-    async with create_connected_server_and_client_session(mcp_app) as client:
+    """The `backend` parameter should be advertised in fetch_content's input schema."""
+    async with Client(mcp_app) as client:
         tools_result = await client.list_tools()
         fetch_tool = next(t for t in tools_result.tools if t.name == "fetch_content")
-        props = fetch_tool.inputSchema.get("properties", {})
-        assert "backend" in props, (
-            f"expected 'backend' in fetch_content inputSchema, got: {list(props)}"
-        )
+        props = fetch_tool.input_schema.get("properties", {})
+        assert "backend" in props, f"expected 'backend' in fetch_content input schema, got: {list(props)}"
+        assert "parse_mode" in props, f"expected 'parse_mode' in fetch_content input schema, got: {list(props)}"
 
 
 @pytest.mark.asyncio
-async def test_search_tool_handles_errors():
-    """Browser backend error (e.g. timeout) should return friendly message."""
-    mock_sf = MagicMock()
-    mock_async_fetch = AsyncMock(side_effect=Exception("timeout from browser"))
-    mock_sf.async_fetch = mock_async_fetch
+async def test_search_tool_handles_errors(httpx_search_backend):
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    mock_module = MagicMock()
-    mock_module.StealthyFetcher = mock_sf
-
-    with patch.dict(sys.modules, {"scrapling.fetchers.stealth_chrome": mock_module}):
-        async with create_connected_server_and_client_session(mcp_app) as client:
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        async with Client(mcp_app) as client:
             result = await client.call_tool("search", {"query": "timeout test"})
             text = result.content[0].text
             # Should return a user-friendly message, not a protocol error
             assert "No results were found" in text or "error" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_expand_link_tool_round_trips_ref_token():
+    long_url = "https://example.com/" + "segment/" * 20 + "?q=1"
+    token = ddg_server.links.shorten(long_url)
+
+    async with Client(mcp_app) as client:
+        result = await client.call_tool("expand_link", {"token": token})
+        assert result.content[0].text == long_url
+
+        missing = await client.call_tool("expand_link", {"token": "ref://00000000"})
+        assert missing.content[0].text.startswith("Error: Unknown link reference")
+
+
+@pytest.mark.asyncio
+async def test_fetch_content_tool_accepts_ref_token(local_http_server, allow_private_fetches):
+    html = "<html><body><h1>Via Token</h1></body></html>"
+    url = local_http_server(html) + "/" + "p/" * 70
+    token = ddg_server.links.shorten(url)
+
+    async with Client(mcp_app) as client:
+        result = await client.call_tool("fetch_content", {"url": token})
+        assert "Via Token" in result.content[0].text
